@@ -1,0 +1,60 @@
+[tool.poetry]
+name = "src"
+version = "0.1.0"
+description = "A short description of the project"
+authors = ["NAM Analytics and Applications Team <nam-wikker@shell.com>"]
+
+[tool.poetry.dependencies]
+python = "~3.7"
+databricks-connect = "~7.3"
+python-dotenv = "^0.15.0"
+ipykernel = "^5.4.3"
+pandas = "1.0.1"
+numpy = "1.18.1"
+sqlalchemy = "^1.3.23"
+pyodbc = "^4.0.30"
+pyarrow = "^3.0.0"
+namtoolkit = {git = "https://github.com/sede-x/nam-namtoolkit.git", rev = "main", optional = true}
+matplotlib = "^3.3.4"
+exchangelib = {extras = ["complete"], version = "^4.1.0"}
+azure-storage-blob = "^12.8.1"
+
+[tool.poetry.dev-dependencies]
+pytest = "^6.1"
+pre-commit = "^2.10.1"
+pytest-cov = "^2.11.1"
+Sphinx = "^3.5.0"
+
+[tool.poetry.extras]
+local = ["namtoolkit"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 79
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests/"]
+xfail_strict = true
+junit_family = "xunit2"
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore:Deprecated in *.*.*:DeprecationWarning",
+]
