@@ -16,6 +16,9 @@ import numpy as np
 import pandas as pd
 
 
+__all__ = ["Condition"]
+
+
 class Condition:
     def __init__(
         self,
@@ -49,8 +52,10 @@ class Condition:
             self.validate_index(index)
             self.index = index
 
-    def _has_datetime_intervalindex(self) -> bool:
-        return self.intervals.dtype.subtype == np.dtype("datetime64[ns]")
+    def _is_datetime_type(self) -> bool:
+        return self.intervals.dtype.subtype == np.dtype(
+            "datetime64[ns]"
+        ) or isinstance(self.index, pd.DatetimeIndex)
 
     def _is_none(self, obj) -> List[bool]:
         return [x is None for x in list(obj)]
@@ -223,7 +228,7 @@ class Condition:
     def move(self, value: object) -> "Condition":
         result = self.copy()
 
-        if self._has_datetime_intervalindex():
+        if self._is_datetime_type():
             value = pd.Timedelta(value)
         result.intervals = self.shift_intervals(value, value)
 
@@ -232,7 +237,7 @@ class Condition:
     def shrink(self, value: object) -> "Condition":
         result = self.copy()
         try:
-            if self._has_datetime_intervalindex():
+            if self._is_datetime_type():
                 value = pd.Timedelta(value)
             result.intervals = self.shift_intervals(value, -value)
         except ValueError:
@@ -240,7 +245,7 @@ class Condition:
         return result
 
     def grow(self, value: object) -> "Condition":
-        if self._has_datetime_intervalindex():
+        if self._is_datetime_type():
             value = pd.Timedelta(value)
         return self.shrink(-value)
 
@@ -321,7 +326,7 @@ class Condition:
 
         op, value = self.extract_operator(value)
 
-        if self._has_datetime_intervalindex():
+        if self._is_datetime_type():
             value = pd.Timedelta(value)
         result.intervals = pd.IntervalIndex(
             [x for x in self.intervals if op(x.length, value)]
