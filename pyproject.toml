@@ -1,8 +1,10 @@
 [tool.poetry]
-name = "src"
+name = "persue"
 version = "0.1.0"
-description = "A short description of the project"
-authors = ["NAM Analytics and Applications Team <nam-wikker@shell.com>"]
+description = "Timeseries analysis modules"
+authors = ["Jordi Dekker <pypi@jordidekker.net>"]
+license = "MIT"
+readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "~3.7"
