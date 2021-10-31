@@ -26,7 +26,7 @@ class Condition:
         index: pd.Index = None,
     ):
         self.index = None
-        self.intervals = pd.IntervalIndex([])
+        self.interval_index = pd.IntervalIndex([])
 
         if self.all_nons([condition, index]):
             raise ValueError("either a condition or index is required")
@@ -42,26 +42,23 @@ class Condition:
                 )
             self.validate_series(condition)
             self.index = condition.index
-            self.intervals = self.calc_intervals(condition)
+            self.interval_index = self.calc_intervals(condition)
         if index is not None:
             if not isinstance(index, pd.Index):
                 raise TypeError(
-                    "condition must be of type `pd.Index`, "
+                    "index must be of type `pd.Index`, "
                     f"`{type(index)}` was passed"
                 )
             self.validate_index(index)
             self.index = index
 
     def _is_datetime_type(self) -> bool:
-        return self.intervals.dtype.subtype == np.dtype(
+        return self.interval_index.dtype.subtype == np.dtype(
             "datetime64[ns]"
         ) or isinstance(self.index, pd.DatetimeIndex)
 
     def _is_none(self, obj) -> List[bool]:
         return [x is None for x in list(obj)]
-
-    def any_nons(self, obj) -> bool:
-        return any(self._is_none(obj))
 
     def all_nons(self, obj) -> bool:
         return all(self._is_none(obj))
@@ -90,13 +87,13 @@ class Condition:
         if self.index is not None:
             assert self.index.equals(obj), "indices must be equal"
 
-    def validate_condition(self, obj: "Condition") -> None:
-        self.validate_index(obj.index)
-
     def calc_intervals(self, obj: pd.Series) -> pd.IntervalIndex:
-        groups = (obj != obj.shift(1)).cumsum()
+        # compensate for the right open interval
+        obj = obj | ((obj != obj.shift(1)) & obj.shift(1))
 
-        intervals = groups.groupby(groups[obj]).apply(
+        g = (obj != obj.shift(1)).cumsum()
+
+        intervals = g.groupby(g[obj]).apply(
             lambda x: (x.index.min(), x.index.max())
         )
 
@@ -107,7 +104,7 @@ class Condition:
 
     def mask(self, s: Union[pd.Series, pd.DataFrame] = None) -> pd.Series:
         idx = self.index if s is None else s.index
-        cat = pd.cut(idx, self.intervals)
+        cat = pd.cut(idx, self.interval_index)
         return pd.Series(data=~cat.isna(), index=self.index)
 
     @staticmethod
@@ -116,7 +113,7 @@ class Condition:
 
         m = 0
         for t in s:
-            if t.left > s[m].right:
+            if not t.overlaps(s[m]):
                 m += 1
                 s[m] = t
             else:
@@ -125,15 +122,22 @@ class Condition:
                 )
         return pd.IntervalIndex(s[: m + 1])
 
+    def reduce(self):
+        result = self.copy()
+        result.interval_index = Condition._reduce_intervals(
+            self.interval_index
+        )
+        return result
+
     def _or(self, other: Union[pd.Series, "Condition"]) -> "Condition":
         if isinstance(other, pd.Series):
             other = self.reproduce(condition=other)
             self.validate_index(other.index)
-        s = self.intervals.append(other.intervals)
+        s = self.interval_index.append(other.interval_index)
 
         result = self.copy()
         result.index = self.index if other.index is None else other.index
-        result.intervals = Condition._reduce_intervals(s)
+        result.interval_index = Condition._reduce_intervals(s)
 
         return result
 
@@ -147,27 +151,25 @@ class Condition:
         if isinstance(other, pd.Series):
             other = self.reproduce(condition=other)
             self.validate_index(other.index)
-        intervals = sorted(other.intervals, key=lambda x: x.left)
+        intervals = sorted(other.interval_index, key=lambda x: x.left)
 
         result = self.copy()
         result.index = self.index if other.index is None else other.index
 
-        if self.intervals is None or other.intervals is None:
-            result.intervals = pd.IntervalIndex([])
-        else:
-            r = []
-            for i in intervals:
-                overlaps = self.intervals.overlaps(i)
-                if any(overlaps):
-                    r += [
-                        pd.Interval(
-                            max(j.left, i.left),
-                            min(j.right, i.right),
-                            i.closed,
-                        )
-                        for j in list(compress(self.intervals, overlaps))
-                    ]
-            result.intervals = pd.IntervalIndex(r)
+        r = []
+        for i in intervals:
+            overlaps = self.interval_index.overlaps(i)
+            if any(overlaps):
+                r += [
+                    pd.Interval(
+                        max(j.left, i.left),
+                        min(j.right, i.right),
+                        i.closed,
+                    )
+                    for j in list(compress(self.interval_index, overlaps))
+                ]
+        result.interval_index = pd.IntervalIndex(r)
+
         return result
 
     def __and__(self, other: Union[pd.Series, "Condition"]) -> "Condition":
@@ -192,7 +194,7 @@ class Condition:
         return self._xor(other)
 
     def _not(self) -> "Condition":
-        intervals = sorted(self.intervals, key=lambda x: x.left)
+        intervals = sorted(self.interval_index, key=lambda x: x.left)
         start, end = self.index.min(), self.index.max()
 
         r = []
@@ -208,29 +210,37 @@ class Condition:
                 pd.Interval(intervals[-1].right, end, intervals[-1].closed)
             )
         result = self.copy()
-        result.intervals = pd.IntervalIndex(r)
+        result.interval_index = pd.IntervalIndex(r)
 
         return result
+
+    def inverse(self) -> "Condition":
+        return self._not()
 
     def __invert__(self) -> "Condition":
         return self._not()
 
     def shift_intervals(self, left, right) -> pd.IntervalIndex:
+        start, end = self.index.min(), self.index.max()
         s = pd.IntervalIndex(
             [
-                pd.Interval(x.left + left, x.right + right, x.closed)
-                for x in self.intervals
+                pd.Interval(
+                    max(start, x.left + left),
+                    min(end, x.right + right),
+                    x.closed,
+                )
+                for x in self.interval_index
             ]
         )
 
-        return Condition._reduce_intervals(s)
+        return s
 
     def move(self, value: object) -> "Condition":
         result = self.copy()
 
         if self._is_datetime_type():
             value = pd.Timedelta(value)
-        result.intervals = self.shift_intervals(value, value)
+        result.interval_index = self.shift_intervals(value, value)
 
         return result
 
@@ -239,8 +249,8 @@ class Condition:
         try:
             if self._is_datetime_type():
                 value = pd.Timedelta(value)
-            result.intervals = self.shift_intervals(value, -value)
-        except ValueError:
+            result.interval_index = self.shift_intervals(value / 2, -value / 2)
+        except (ValueError, IndexError):
             raise ValueError("some intervals are to short, filter first")
         return result
 
@@ -248,6 +258,16 @@ class Condition:
         if self._is_datetime_type():
             value = pd.Timedelta(value)
         return self.shrink(-value)
+
+    def grow_end(self) -> "Condition":
+        max_value = max(self.index)
+        s = sorted(self.interval_index, key=lambda x: x.left)
+        for i in range(len(s) - 1):
+            s[i].right = s[i + 1]
+        s[-1].right = max_value
+
+        result = self.copy()
+        result.interval_index = pd.IntervalIndex(s)
 
     def copy(self):
         return copy.deepcopy(self)
@@ -271,11 +291,10 @@ class Condition:
     def stack(self, df: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
         if isinstance(df, pd.Series):
             df = df.to_frame()
-        if len(self.intervals) == 0:
+        if len(self.interval_index) == 0:
             raise ValueError("No intervals to stack")
-        print(self.intervals)
 
-        df["interval"] = pd.cut(df.index, self.intervals)
+        df["interval"] = pd.cut(df.index, self.interval_index)
         df = df.dropna(subset=["interval"])
 
         dfs = []
@@ -328,8 +347,8 @@ class Condition:
 
         if self._is_datetime_type():
             value = pd.Timedelta(value)
-        result.intervals = pd.IntervalIndex(
-            [x for x in self.intervals if op(x.length, value)]
+        result.interval_index = pd.IntervalIndex(
+            [x for x in self.interval_index if op(x.length, value)]
         )
 
         return result
@@ -337,10 +356,10 @@ class Condition:
     def to_frame(self):
         return pd.DataFrame(
             {
-                "left": [i.left for i in self.intervals],
-                "right": [i.right for i in self.intervals],
-                "closed": [i.closed for i in self.intervals],
-                "length": [i.length for i in self.intervals],
+                "left": [i.left for i in self.interval_index],
+                "right": [i.right for i in self.interval_index],
+                "closed": [i.closed for i in self.interval_index],
+                "length": [i.length for i in self.interval_index],
             }
         )
 
@@ -348,7 +367,7 @@ class Condition:
         return self.to_frame().__repr__()
 
     def __len__(self):
-        return len(self.intervals)
+        return len(self.interval_index)
 
     def _index_filter(
         self, operator, value: Union[int, float, time, datetime]
@@ -360,9 +379,9 @@ class Condition:
         else:
             ref = self.index
         mask = pd.Series(operator(ref, value), self.index)
-        result.intervals = self.calc_intervals(mask)
+        result.interval_index = self.calc_intervals(mask)
 
-        if len(self.intervals) == 0:
+        if len(self.interval_index) == 0:
             return result
         return self._and(result)
 
@@ -377,3 +396,10 @@ class Condition:
 
     def at_or_after(self, value: Union[time, datetime]) -> "Condition":
         return self._index_filter(ge, value)
+
+    def __eq__(self, other: "Condition") -> bool:
+        return (
+            isinstance(other, type(self))
+            & self.index.equals(other.index)
+            & self.interval_index.equals(other.interval_index)
+        )
