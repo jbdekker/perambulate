@@ -26,7 +26,7 @@ class Condition:
         index: pd.Index = None,
     ):
         self.index = None
-        self.interval_index = pd.IntervalIndex([])
+        self.interval_index = self._empty_interval_index
 
         if self.all_nons([condition, index]):
             raise ValueError("either a condition or index is required")
@@ -51,6 +51,12 @@ class Condition:
                 )
             self.validate_index(index)
             self.index = index
+
+    @property
+    def _empty_interval_index(self):
+        return pd.IntervalIndex(
+            [], closed="left", dtype="interval[datetime64[ns]]"
+        )
 
     def _is_datetime_type(self) -> bool:
         return self.interval_index.dtype.subtype == np.dtype(
@@ -98,7 +104,7 @@ class Condition:
         )
 
         if intervals.empty:
-            return pd.IntervalIndex([])
+            return self._empty_interval_index
 
         return pd.IntervalIndex.from_tuples(intervals, closed="left")
 
@@ -262,17 +268,27 @@ class Condition:
     def grow_end(self) -> "Condition":
         max_value = max(self.index)
         s = sorted(self.interval_index, key=lambda x: x.left)
-        for i in range(len(s) - 1):
-            s[i].right = s[i + 1]
-        s[-1].right = max_value
 
         result = self.copy()
-        result.interval_index = pd.IntervalIndex(s)
+        if self.__len__() == 0:
+            result.interval_index = self._empty_interval_index
+            return result
+
+        r = []
+        for i in range(len(s) - 1):
+            r.append((s[i].left, s[i + 1].left))
+        r.append((s[-1].left, max_value))
+        result.interval_index = pd.IntervalIndex.from_tuples(
+            r, closed=self.interval_index.closed
+        )
+        return result
 
     def copy(self):
         return copy.deepcopy(self)
 
-    def plot(self, s: pd.Series, *args, figsize=(16, 4), **kwargs) -> None:
+    def plot(
+        self, s: pd.Series, *args, figsize=(16, 4), **kwargs
+    ) -> None:  # pragma: no cover
         from matplotlib import pyplot as plt
 
         _, ax = plt.subplots(*args, figsize=figsize, **kwargs)
@@ -305,7 +321,7 @@ class Condition:
 
     def stack_plot(
         self, s: pd.Series, *args, figsize=(16, 4), **kwargs
-    ) -> None:
+    ) -> None:  # pragma: no cover
         if not isinstance(s, pd.Series):
             raise TypeError("stack_plot only supports `pd.Series1`")
         df = self.stack(s)
@@ -403,3 +419,61 @@ class Condition:
             & self.index.equals(other.index)
             & self.interval_index.equals(other.interval_index)
         )
+
+    def touches(self, other: "Condition") -> "Condition":
+        """Filters condition intervals based on whether it touches an
+        interval in other"""
+        result = self.copy()
+
+        r = []
+        for s in self.interval_index:
+            if any(other.interval_index.overlaps(s)):
+                r.append(s)
+
+        result.interval_index = pd.IntervalIndex(r)
+
+        return result
+
+    def encloses(self, other: "Condition") -> "Condition":
+        """Filters condition intervals based on whether it encloses an
+        interval in other"""
+
+        result = self.copy()
+
+        r = []
+        for s in self.interval_index:
+            overlaps = other.interval_index.overlaps(s)
+
+            if any(
+                [
+                    (s.left <= j.left) and (s.right >= j.right)
+                    for j in list(compress(other.interval_index, overlaps))
+                ]
+            ):
+                r.append(s)
+
+        result.interval_index = pd.IntervalIndex(r)
+
+        return result
+
+    def inside(self, other: "Condition") -> "Condition":
+        """Filters condition intervals based on whether it is enclosed by an
+        interval in other"""
+
+        result = self.copy()
+
+        r = []
+        for s in self.interval_index:
+            overlaps = other.interval_index.overlaps(s)
+
+            if any(
+                [
+                    (s.left >= j.left) and (s.right <= j.right)
+                    for j in list(compress(other.interval_index, overlaps))
+                ]
+            ):
+                r.append(s)
+
+        result.interval_index = pd.IntervalIndex(r)
+
+        return result

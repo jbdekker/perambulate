@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "perambulate"
-version = "0.1.1"
+version = "0.1.2"
 description = "Timeseries analysis modules"
 authors = ["Jordi Dekker <pypi@jordidekker.net>"]
 license = "MIT"

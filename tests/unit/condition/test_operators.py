@@ -138,6 +138,24 @@ def test_grow_shrink(sinusoid_d):
     assert A.grow("2d") == A.shrink("-2d")
 
 
+def test_grow_end(sinusoid_d):
+    A = Condition(condition=(sinusoid_d > -0.5) & (sinusoid_d < 0.5))
+    B = A.grow_end()
+    C = Condition(index=sinusoid_d.index).grow_end()
+
+    idx = pd.IntervalIndex.from_tuples(
+        [
+            (datetime(2021, 1, 7), datetime(2021, 1, 20)),
+            (datetime(2021, 1, 20), datetime(2021, 2, 3)),
+            (datetime(2021, 2, 3), datetime(2021, 2, 9)),
+        ],
+        closed="left",
+    )
+
+    assert B.interval_index.equals(idx)
+    assert C.interval_index.equals(C._empty_interval_index)
+
+
 def test_reduce(sinusoid_d):
     A = Condition(condition=(sinusoid_d > -0.5) & (sinusoid_d < 0.5))
 
