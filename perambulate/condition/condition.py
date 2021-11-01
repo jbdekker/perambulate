@@ -9,11 +9,13 @@ from operator import gt
 from operator import le
 from operator import lt
 from operator import ne
+from typing import Callable
 from typing import List
 from typing import Union
 
 import numpy as np
 import pandas as pd
+from pandas.core.indexes.datetimes import DatetimeIndex
 
 
 __all__ = ["Condition"]
@@ -42,7 +44,7 @@ class Condition:
                 )
             self.validate_series(condition)
             self.index = condition.index
-            self.interval_index = self.calc_intervals(condition)
+            self.interval_index = self.mask_to_intervals(condition)
         if index is not None:
             if not isinstance(index, pd.Index):
                 raise TypeError(
@@ -93,15 +95,28 @@ class Condition:
         if self.index is not None:
             assert self.index.equals(obj), "indices must be equal"
 
-    def calc_intervals(self, obj: pd.Series) -> pd.IntervalIndex:
-        # compensate for the right open interval
-        obj = obj | ((obj != obj.shift(1)) & obj.shift(1))
+    def mask_to_intervals(self, obj: pd.Series) -> pd.IntervalIndex:
+        mask = (obj != obj.shift(1)).cumsum()
 
-        g = (obj != obj.shift(1)).cumsum()
+        datetime_mask = False
+        freq = None
+        if isinstance(obj.index, DatetimeIndex):
+            datetime_mask = True
+            freq = pd.Timedelta(obj.index.freq)
 
-        intervals = g.groupby(g[obj]).apply(
-            lambda x: (x.index.min(), x.index.max())
-        )
+        def func(x):
+            left = x.index[0]
+            i = mask.index.get_loc(x.index[-1])
+            try:
+                right = mask.index[i + 1]
+            except IndexError:
+                if datetime_mask and freq is not None:
+                    right = mask.index[i] + freq
+                else:
+                    right = mask.index[i] + (mask.index[i] - mask.index[i - 1])
+            return (left, right)
+
+        intervals = mask.groupby(mask[obj]).apply(func)
 
         if intervals.empty:
             return self._empty_interval_index
@@ -227,12 +242,11 @@ class Condition:
         return self._not()
 
     def shift_intervals(self, left, right) -> pd.IntervalIndex:
-        start, end = self.index.min(), self.index.max()
         s = pd.IntervalIndex(
             [
                 pd.Interval(
-                    max(start, x.left + left),
-                    min(end, x.right + right),
+                    x.left + left,
+                    x.right + right,
                     x.closed,
                 )
                 for x in self.interval_index
@@ -250,20 +264,25 @@ class Condition:
 
         return result
 
-    def shrink(self, value: object) -> "Condition":
+    def shrink(self, value: object, side="both") -> "Condition":
         result = self.copy()
         try:
+            left = value if side in ["left", "both"] else 0
+            right = value if side in ["right", "both"] else 0
+
             if self._is_datetime_type():
-                value = pd.Timedelta(value)
-            result.interval_index = self.shift_intervals(value / 2, -value / 2)
+                left = pd.Timedelta(left)
+                right = pd.Timedelta(right)
+
+            result.interval_index = self.shift_intervals(left, -right)
         except (ValueError, IndexError):
             raise ValueError("some intervals are to short, filter first")
         return result
 
-    def grow(self, value: object) -> "Condition":
+    def grow(self, value: object, side="both") -> "Condition":
         if self._is_datetime_type():
             value = pd.Timedelta(value)
-        return self.shrink(-value)
+        return self.shrink(-value, side)
 
     def grow_end(self) -> "Condition":
         max_value = max(self.index)
@@ -287,31 +306,28 @@ class Condition:
         return copy.deepcopy(self)
 
     def plot(
-        self, s: pd.Series, *args, figsize=(16, 4), **kwargs
+        self, data: pd.Series, *args, figsize=(16, 4), **kwargs
     ) -> None:  # pragma: no cover
         from matplotlib import pyplot as plt
 
         _, ax = plt.subplots(*args, figsize=figsize, **kwargs)
 
-        s.plot(ax=ax)
+        data.plot(ax=ax)
 
         ax.fill_between(
-            s.index,
+            data.index,
             0,
             1,
-            where=self.mask(s),
+            where=self.mask(data),
             alpha=0.3,
             transform=ax.get_xaxis_transform(),
         )
 
-    def stack(self, df: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
-        if isinstance(df, pd.Series):
-            df = df.to_frame()
+    def stack(self, data: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
         if len(self.interval_index) == 0:
             raise ValueError("No intervals to stack")
 
-        df["interval"] = pd.cut(df.index, self.interval_index)
-        df = df.dropna(subset=["interval"])
+        df = self._cut(data)
 
         dfs = []
         for _, data in df.groupby("interval"):
@@ -323,7 +339,7 @@ class Condition:
         self, s: pd.Series, *args, figsize=(16, 4), **kwargs
     ) -> None:  # pragma: no cover
         if not isinstance(s, pd.Series):
-            raise TypeError("stack_plot only supports `pd.Series1`")
+            raise TypeError("stack_plot only supports `pd.Series`")
         df = self.stack(s)
 
         from matplotlib import pyplot as plt
@@ -395,7 +411,7 @@ class Condition:
         else:
             ref = self.index
         mask = pd.Series(operator(ref, value), self.index)
-        result.interval_index = self.calc_intervals(mask)
+        result.interval_index = self.mask_to_intervals(mask)
 
         if len(self.interval_index) == 0:
             return result
@@ -477,3 +493,78 @@ class Condition:
         result.interval_index = pd.IntervalIndex(r)
 
         return result
+
+    def _cut(self, data: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
+        df = pd.DataFrame(data)
+        df["interval"] = pd.cut(df.index, self.interval_index)
+        return df.dropna(subset=["interval"])
+
+    def series_from_condition(
+        self,
+        data: Union[pd.Series, pd.DataFrame],
+        func: Union[Callable, dict],
+        *args,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """
+        Parameters
+        ----------
+        data : pd.Series, pd.DataFrame
+        func : function
+            Function to apply to each column
+        *args : tuple
+            Positional arguments to pass to `func` in addition to the
+            array/series.
+        **kwargs
+            Additional keyword arguments to pass as keywords arguments to
+            `func`.
+
+        Returns
+        -------
+        Series or DataFrame
+            Result of applying ``func`` over each Interval along the columns
+            of the DataFrame.
+
+        Examples
+        --------
+        >>> df = pd.DataFrame([1, 3, 0, 2, 4], columns=["A"])
+        >>> C = Condition(df.A >= 1)
+        >>> df["B"] = C.series_from_condition(df.A, np.mean)
+           A  B
+        0  1  2
+        1  3  2
+        2  0  NaN
+        3  2  3
+        4  4  3
+        """
+
+        df = self._cut(data)
+        df["interval"] = pd.Categorical(df.interval).codes
+
+        df_agg = df.groupby(df.interval, as_index=False).agg(
+            func, *args, **kwargs
+        )
+
+        if isinstance(df_agg.columns, pd.MultiIndex):
+            df_agg.columns = ["_".join(c).strip("_") for c in df_agg.columns]
+
+        df = df["interval"].reset_index()
+
+        result = (
+            pd.merge(df, df_agg, on="interval", how="left")
+            .reset_index(drop=True)
+            .drop(columns=["interval"])
+            .set_index("index")
+        )
+
+        return result
+
+    def bin_data(
+        self, data: Union[pd.Series, pd.DataFrame]
+    ) -> List[Union[pd.Series, pd.DataFrame]]:
+        return [grp for _, grp in self._cut(data).groupby("interval")]
+
+    def describe(
+        self, data: Union[pd.Series, pd.DataFrame], func: Union[Callable, dict]
+    ):
+        pass

@@ -46,7 +46,7 @@ def test_or(sinusoid_d):
             (datetime(2021, 1, 1), datetime(2021, 1, 4)),
             (datetime(2021, 1, 11), datetime(2021, 1, 19)),
             (datetime(2021, 1, 24), datetime(2021, 2, 1)),
-            (datetime(2021, 2, 8), datetime(2021, 2, 9)),
+            (datetime(2021, 2, 8), datetime(2021, 2, 10)),
         ],
         closed="left",
     )
@@ -105,7 +105,7 @@ def test_move(sinusoid_d):
     idx = pd.IntervalIndex.from_tuples(
         [
             (datetime(2021, 1, 6), datetime(2021, 1, 13)),
-            (datetime(2021, 1, 21), datetime(2021, 2, 9)),
+            (datetime(2021, 1, 21), datetime(2021, 2, 12)),
         ],
         closed="left",
     )
@@ -114,7 +114,6 @@ def test_move(sinusoid_d):
 
     assert C.interval_index.equals(idx)
     assert A == A.move("-2d").move("1d").move("1d")
-    assert A != A.move("10d").move("-10d")  # overflows the index
 
 
 def test_grow_shrink(sinusoid_d):
@@ -132,8 +131,8 @@ def test_grow_shrink(sinusoid_d):
     with pytest.raises(ValueError):
         A.shrink("10d")  # intervals collapse
 
-    assert A.grow("2d").interval_index.equals(idx)
-    assert A == A.grow("2d").grow("-2d")
+    assert A.grow("1d").interval_index.equals(idx)
+    assert A == A.grow("2d").grow("-2d", "left").shrink("2d", "right")
     assert A == A.shrink("1d").shrink("-1d")
     assert A.grow("2d") == A.shrink("-2d")
 
@@ -161,7 +160,7 @@ def test_reduce(sinusoid_d):
 
     idx = pd.IntervalIndex.from_tuples(
         [
-            (datetime(2021, 1, 1), datetime(2021, 2, 9)),
+            (datetime(2020, 9, 29), datetime(2021, 5, 16)),
         ],
         closed="left",
     )

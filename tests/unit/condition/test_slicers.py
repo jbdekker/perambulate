@@ -69,7 +69,7 @@ def test_time(sinusoid_h):
     idx = pd.IntervalIndex.from_tuples(
         [
             (datetime(2021, 1, 1, 9), datetime(2021, 1, 1, 17)),
-            (datetime(2021, 1, 2, 9), datetime(2021, 1, 2, 15)),
+            (datetime(2021, 1, 2, 9), datetime(2021, 1, 2, 16)),
         ],
         closed="left",
     )
