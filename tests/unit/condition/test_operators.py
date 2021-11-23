@@ -141,6 +141,7 @@ def test_grow_end(sinusoid_d):
     A = Condition(condition=(sinusoid_d > -0.5) & (sinusoid_d < 0.5))
     B = A.grow_end()
     C = Condition(index=sinusoid_d.index).grow_end()
+    D = A.grow_end(include_last=True)
 
     idx = pd.IntervalIndex.from_tuples(
         [
@@ -151,8 +152,9 @@ def test_grow_end(sinusoid_d):
         closed="left",
     )
 
-    assert B.interval_index.equals(idx)
+    assert B.interval_index.equals(idx[:-1])
     assert C.interval_index.equals(C._empty_interval_index)
+    assert D.interval_index.equals(idx)
 
 
 def test_reduce(sinusoid_d):

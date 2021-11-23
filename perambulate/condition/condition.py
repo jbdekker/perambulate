@@ -2,6 +2,8 @@ import copy
 import re
 from datetime import datetime
 from datetime import time
+from datetime import timedelta
+from datetime import timezone
 from itertools import compress
 from operator import eq
 from operator import ge
@@ -126,7 +128,7 @@ class Condition:
     def mask(self, s: Union[pd.Series, pd.DataFrame] = None) -> pd.Series:
         idx = self.index if s is None else s.index
         cat = pd.cut(idx, self.interval_index)
-        return pd.Series(data=~cat.isna(), index=self.index)
+        return pd.Series(data=~cat.isna(), index=idx)
 
     @staticmethod
     def _reduce_intervals(s: pd.IntervalIndex) -> pd.IntervalIndex:
@@ -134,7 +136,7 @@ class Condition:
 
         m = 0
         for t in s:
-            if not t.overlaps(s[m]):
+            if not t.overlaps(s[m]) and s[m].right != t.left:
                 m += 1
                 s[m] = t
             else:
@@ -214,29 +216,51 @@ class Condition:
     def __xor__(self, other: Union[pd.Series, "Condition"]) -> "Condition":
         return self._xor(other)
 
-    def _not(self) -> "Condition":
+    def _not(self, limit_area: str = None) -> "Condition":
+        """
+
+        Parameters
+        ----------
+        limit_area : {{`None`, 'inside', 'left', 'right'}}, default None
+            If limit is specified, inverse periods will only be returned with
+            this restriction.
+
+            * ``None``: No restriction
+            * 'inside': Only surrounded inverse periods
+            * 'left': Only inverse periods with a period on the left
+            * 'right': Only inverse periods with a period on the right
+
+        Returns
+        -------
+        Condition
+        """
         intervals = sorted(self.interval_index, key=lambda x: x.left)
         start, end = self.index.min(), self.index.max()
 
         r = []
-        if start < intervals[0].left:
-            r.append(
-                pd.Interval(start, intervals[0].left, intervals[0].closed)
-            )
+
+        if limit_area != "inside":
+            if start < intervals[0].left and limit_area != "right":
+                r.append(
+                    pd.Interval(start, intervals[0].left, intervals[0].closed)
+                )
+
+            if end > intervals[-1].right and limit_area != "left":
+                r.append(
+                    pd.Interval(intervals[-1].right, end, intervals[-1].closed)
+                )
+
         for n, i in enumerate(intervals[:-1]):
             if i.right >= start and intervals[n + 1].left <= end:
                 r.append(pd.Interval(i.right, intervals[n + 1].left, i.closed))
-        if end > intervals[-1].right:
-            r.append(
-                pd.Interval(intervals[-1].right, end, intervals[-1].closed)
-            )
+
         result = self.copy()
         result.interval_index = pd.IntervalIndex(r)
 
         return result
 
-    def inverse(self) -> "Condition":
-        return self._not()
+    def inverse(self, limit_area: str = "None") -> "Condition":
+        return self._not(limit_area)
 
     def __invert__(self) -> "Condition":
         return self._not()
@@ -279,12 +303,93 @@ class Condition:
             raise ValueError("some intervals are to short, filter first")
         return result
 
+    def clip(
+        self, lower: object = None, upper: object = None, side="right"
+    ) -> "Condition":
+        """
+        Trim interval length at the input threshold(s)
+
+        Parameters
+        ----------
+        lower : object
+            Minimum interval length, all intervals having a length below this
+            value will be extended to it.
+        upper : object
+            Maximum interval length, all intervals having a length above this
+            value will be shortened to it.
+        side : {{'both', 'left', 'right'}}, default 'right'
+            Side on which to adjust the interval
+
+        Returns
+        -------
+        Condition
+            Same type as calling object with the intervals clipped according to
+            the clip threshold(s)
+        """
+        if self._is_datetime_type():
+            lower = pd.Timedelta(lower)
+            upper = pd.Timedelta(upper)
+            null = pd.Timedelta(0)
+
+        r = []
+        for x in self.interval_index:
+            l_delta = lower - x.length
+            u_delta = x.length - upper
+
+            # check lower bound
+            if l_delta > null:  # to short
+                delta = l_delta
+            elif u_delta > null:  # to long
+                delta = -u_delta
+            else:
+                delta = null
+
+            left_adj = null
+            righ_adj = null
+
+            if side == "left":
+                left_adj = delta
+            elif side == "right":
+                righ_adj = delta
+            elif side == "both":
+                left_adj = delta / 2
+                righ_adj = delta / 2
+            else:
+                raise ValueError("Invalid side")
+
+            r.append(
+                pd.Interval(
+                    x.left - left_adj,
+                    x.right + righ_adj,
+                    x.closed,
+                )
+            )
+
+        result = self.copy()
+        result.interval_index = pd.IntervalIndex(r)
+
+        return result
+
     def grow(self, value: object, side="both") -> "Condition":
         if self._is_datetime_type():
             value = pd.Timedelta(value)
         return self.shrink(-value, side)
 
-    def grow_end(self) -> "Condition":
+    def grow_end(self, include_last: bool = False) -> "Condition":
+        """
+        Grow intervals in the condition by extending the end untill the start
+        of the next interval.
+
+        Parameters
+        ----------
+        include_last : bool, default=False
+            When True, the last interval will be extended untill the end of the
+            index
+
+        Returns
+        -------
+        Condition
+        """
         max_value = max(self.index)
         s = sorted(self.interval_index, key=lambda x: x.left)
 
@@ -296,7 +401,10 @@ class Condition:
         r = []
         for i in range(len(s) - 1):
             r.append((s[i].left, s[i + 1].left))
-        r.append((s[-1].left, max_value))
+
+        if include_last:
+            r.append((s[-1].left, max_value))
+
         result.interval_index = pd.IntervalIndex.from_tuples(
             r, closed=self.interval_index.closed
         )
@@ -314,14 +422,33 @@ class Condition:
 
         data.plot(ax=ax)
 
+        # setup colors
+        cat = pd.cut(data.index, self.interval_index)
+        s = pd.Series(data=cat, index=data.index).dropna()
+        s = (s != s.shift()).cumsum() % 2
+        s = s.reindex(data.index)
+
         ax.fill_between(
             data.index,
             0,
             1,
-            where=self.mask(data),
-            alpha=0.3,
+            where=self.mask(data) & (s == 0),
+            alpha=0.2,
+            color="teal",
             transform=ax.get_xaxis_transform(),
         )
+
+        ax.fill_between(
+            data.index,
+            0,
+            1,
+            where=self.mask(data) & (s == 1),
+            alpha=0.3,
+            color="teal",
+            transform=ax.get_xaxis_transform(),
+        )
+
+        return ax
 
     def stack(self, data: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
         if len(self.interval_index) == 0:
@@ -372,7 +499,56 @@ class Condition:
             raise KeyError(value)
         return op, value
 
-    def filter(self, value: object) -> "Condition":
+    def filter(self, value: str) -> "Condition":
+        """
+        Filters the periods within the Condition based on the (in)equality
+        defined by **value**
+
+        The **value** string should consists of 2 parts:
+
+        1. An (in)equality operator
+
+            Allowed operators are:
+
+                > : greater than
+                < : less than
+                => : greater or equal than
+                <= : less or equal than
+                == : equal
+                != : not equal
+
+        2. A pd.Timedelta compatible timedelta string
+
+            e.g. "5d", "10m", "90s"
+
+        For example, valid values are thus ">5d", "<=10m", "==90s"
+
+        Parameters
+        ----------
+        value : timedelta (in)equality
+
+        Returns
+        -------
+        Condition
+            Condition whose intervals meet the (in)equality `value`
+
+        Examples
+        --------
+        >>> from perambulate import Condition
+        >>> from perambulate.datasets import load_sinusoid
+
+        >>> df = load_sinusoid()
+        >>> A = Condition((df.sinusoid > -0.5) & (df.sinusoid < 0.75))
+        >>> A
+                         left               right closed          length
+        0 2021-01-06 08:00:00 2021-01-08 14:00:00   left 2 days 06:00:00
+        1 2021-01-21 01:00:00 2021-01-24 09:00:00   left 3 days 08:00:00
+        2 2021-02-03 07:00:00 2021-02-08 22:00:00   left 5 days 15:00:00
+
+        >>> A.filter(">3d").filter("<4d")
+                         left               right closed          length
+        0 2021-01-21 01:00:00 2021-01-24 09:00:00   left 3 days 08:00:00
+        """
         result = self.copy()
 
         op, value = self.extract_operator(value)
@@ -386,6 +562,25 @@ class Condition:
         return result
 
     def to_frame(self):
+        """
+        Convert the Condition's periods to a pd.DataFrame.
+
+        Returns
+        -------
+        DataFrame
+            DataFrame representation of Series.
+
+        Examples
+        --------
+        >>> df = load_sinusoid()
+        >>> A = Condition((df.sinusoid > -0.5) & (df.sinusoid < 0.75))
+        >>> A.to_frame()
+                         left               right closed          length
+        0 2021-01-06 08:00:00 2021-01-08 14:00:00   left 2 days 06:00:00
+        1 2021-01-21 01:00:00 2021-01-24 09:00:00   left 3 days 08:00:00
+        2 2021-02-03 07:00:00 2021-02-08 22:00:00   left 5 days 15:00:00
+
+        """
         return pd.DataFrame(
             {
                 "left": [i.left for i in self.interval_index],
@@ -402,32 +597,47 @@ class Condition:
         return len(self.interval_index)
 
     def _index_filter(
-        self, operator, value: Union[int, float, time, datetime]
+        self,
+        operator,
+        value: Union[int, float, time, datetime],
+        tzinfo: timezone = None,
     ) -> "Condition":
         result = self.copy()
 
-        if isinstance(value, time):
-            ref = self.index.time
+        if tzinfo is not None:
+            ref_index = self.index.tz_convert(tzinfo)
         else:
-            ref = self.index
-        mask = pd.Series(operator(ref, value), self.index)
+            ref_index = self.index
+
+        if isinstance(value, time):
+            ref_index = ref_index.time
+
+        mask = pd.Series(operator(ref_index, value), self.index)
         result.interval_index = self.mask_to_intervals(mask)
 
         if len(self.interval_index) == 0:
             return result
         return self._and(result)
 
-    def before(self, value: Union[time, datetime]) -> "Condition":
-        return self._index_filter(lt, value)
+    def before(
+        self, value: Union[time, datetime], tzinfo: timezone = None
+    ) -> "Condition":
+        return self._index_filter(lt, value, tzinfo)
 
-    def at_or_before(self, value: Union[time, datetime]) -> "Condition":
-        return self._index_filter(le, value)
+    def at_or_before(
+        self, value: Union[time, datetime], tzinfo: timezone = None
+    ) -> "Condition":
+        return self._index_filter(le, value, tzinfo)
 
-    def after(self, value: Union[time, datetime]) -> "Condition":
-        return self._index_filter(gt, value)
+    def after(
+        self, value: Union[time, datetime], tzinfo: timezone = None
+    ) -> "Condition":
+        return self._index_filter(gt, value, tzinfo)
 
-    def at_or_after(self, value: Union[time, datetime]) -> "Condition":
-        return self._index_filter(ge, value)
+    def at_or_after(
+        self, value: Union[time, datetime], tzinfo: timezone = None
+    ) -> "Condition":
+        return self._index_filter(ge, value, tzinfo)
 
     def __eq__(self, other: "Condition") -> bool:
         return (
@@ -537,8 +747,9 @@ class Condition:
         3  2  3
         4  4  3
         """
+        df = data.copy()
 
-        df = self._cut(data)
+        df = self._cut(df)
         df["interval"] = pd.Categorical(df.interval).codes
 
         df_agg = df.groupby(df.interval, as_index=False).agg(
@@ -568,3 +779,65 @@ class Condition:
         self, data: Union[pd.Series, pd.DataFrame], func: Union[Callable, dict]
     ):
         pass
+
+
+class Index(Condition):
+    def __init__(
+        self,
+        index: pd.Index = None,
+    ):
+        super().__init__(index=index)
+
+
+class PeriodicCondition(Condition):
+    def __init__(
+        self,
+        index: pd.Index,
+        freq: Union[pd.Timedelta, timedelta, np.timedelta64, str, int],
+        unit: str = None,
+        start: datetime = None,
+        end: datetime = None,
+        peg: datetime = None,
+        normalize: bool = False,
+        closed: str = "left",
+        partial_periods: bool = False,
+    ):
+        """
+        You can construct a Timedelta scalar through various arguments, including ISO 8601 Duration strings.
+        """
+        super().__init__(index=index)
+
+        freq = pd.Timedelta(value=freq, unit=unit)
+
+        start = start or self.index.min()
+        end = end or self.index.max()
+        periods = np.ceil((self.index.max() - self.index.min()) / freq) + 1
+
+        if peg is not None:
+            start = peg - pd.Timedelta((np.ceil((peg - start) / freq) * freq))
+            periods += 1
+            end = None
+        else:
+            if closed == "left":
+                end = None
+            elif closed == "right":
+                start = None
+            else:
+                raise ValueError(f"`{closed}` is not a valid value for closed")
+
+        date_range = pd.date_range(
+            start=start,
+            end=end,
+            periods=periods,
+            freq=freq,
+            normalize=normalize,
+        )
+
+        if not partial_periods:
+            date_range = date_range[
+                (date_range > index.min()) & (date_range < index.max())
+            ]
+
+        self.interval_index = pd.IntervalIndex.from_breaks(
+            date_range, closed="left"
+        )
