@@ -31,6 +31,9 @@ Please consult the [pyproject.toml](https://github.com/jbdekker/perambulate/blob
 ## Documentation
 The documentation is hosted on GitHub pages: https://jbdekker.github.io/perambulate/
 
+User guides:
+- [Filter conditions by length](condition_filters.md)
+
 ## Contributing
 
 All contributions, bug reports, bug fixes, documentation improvements, enhancements, and ideas are welcome
