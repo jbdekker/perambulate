@@ -26,7 +26,7 @@
   C.grow("2min", "right")
   ```
   
-- ``grow-end``  
+- ``grow_end``  
   Extend each interval to the right as far as possible i.e. until it touches the next interval or the end of the timeseries
   
   ```python
