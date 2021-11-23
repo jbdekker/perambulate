@@ -32,7 +32,7 @@ Please consult the [pyproject.toml](https://github.com/jbdekker/perambulate/blob
 The documentation is hosted on GitHub pages: https://jbdekker.github.io/perambulate/
 
 User guides:
-- [Filter conditions by length](condition_filters.md)
+- [Filter conditions by length](user-guides/condition_filters.md)
 
 ## Contributing
 
