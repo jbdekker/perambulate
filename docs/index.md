@@ -33,6 +33,8 @@ The documentation is hosted on GitHub pages: https://jbdekker.github.io/perambul
 
 User guides:
 - [Filter conditions by length](user-guides/condition_filters.md)
+- [Modify conditions](user-guides/condition-modifiers.md)
+
 
 ## Contributing
 
