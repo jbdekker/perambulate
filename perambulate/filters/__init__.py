@@ -83,12 +83,51 @@ def MovingAverage(s: pd.Series, window_length: int) -> pd.Series:
     return pd.Series(y, index=s.index, name="MovingAverage")
 
 
+def WindowedSinc(
+    s: pd.Series, fc: float = 0.0006, b: float = 0.0002
+) -> pd.Series:
+    """
+    Scaled and windowed sinc filter to turn it into a digital filter
+
+    Background:
+        tomroelandts.com/articles/how-to-create-a-simple-low-pass-filter
+        tomroelandts.com/articles/how-to-create-a-simple-high-pass-filter
+
+    Parameters
+    ----------
+    s : pd.Series
+        Input signal
+    fc : float
+        Cutoff frequency as a fraction of the sampling rate (in (0, 0.5)).
+    b : float
+        Transition band, as a fraction of the sampling rate (in (0, 0.5)).
+
+    Returns
+    -------
+    int, np.array
+        Filter
+    """
+
+    N = int(np.ceil((4 / b)))
+    if not N % 2:
+        N += 1
+
+    n = np.arange(N)
+    h = np.sinc(2 * fc * (n - (N - 1) / 2.0))
+    w = np.blackman(N)
+    h = h * w
+    h = h / np.sum(h)
+
+    return N, h
+
+
 def LowPass(s: pd.Series, fc: float = 0.0006, b: float = 0.0002) -> pd.Series:
     """
     Scaled and windowed sinc filter to turn it into a digital filter
 
     Background:
         tomroelandts.com/articles/how-to-create-a-simple-low-pass-filter
+        tomroelandts.com/articles/how-to-create-a-simple-high-pass-filter
 
     Parameters
     ----------
@@ -105,31 +144,41 @@ def LowPass(s: pd.Series, fc: float = 0.0006, b: float = 0.0002) -> pd.Series:
         Filtered input signal
     """
 
-    # Define the parameters
-    N = int(np.ceil((4 / b)))
-
-    # Make sure that N is odd.
-    if not N % 2:
-        N += 1
-
-    n = np.arange(N)
-
-    # Compute sinc filter.
-    h = np.sinc(2 * fc * (n - (N - 1) / 2.0))
-
-    # Compute Blackman window.
-    w = np.blackman(N)
-
-    # Multiply sinc filter with window.
-    h = h * w
-
-    # Normalize to get unity gain.
-    h = h / np.sum(h)
-
-    # Applying the filter h to a signal s by convolving both sequences
+    _, h = WindowedSinc(s, fc, b)
     y = np.convolve(s.values, h, "valid")
 
     return pd.Series(y, index=s.index, name="LowPass")
+
+
+def HighPass(s: pd.Series, fc: float = 0.1, b: float = 0.08) -> pd.Series:
+    """
+    Scaled and windowed sinc filter to turn it into a digital filter
+
+    Background:
+        tomroelandts.com/articles/how-to-create-a-simple-low-pass-filter
+        tomroelandts.com/articles/how-to-create-a-simple-high-pass-filter
+
+    Parameters
+    ----------
+    s : pd.Series
+        Input signal
+    fc : float
+        Cutoff frequency as a fraction of the sampling rate (in (0, 0.5)).
+    b : float
+        Transition band, as a fraction of the sampling rate (in (0, 0.5)).
+
+    Returns
+    -------
+    ps.Series
+        Filtered input signal
+    """
+    N, h = WindowedSinc(s, fc, b)
+    h = -h
+    h[(N - 1) // 2] += 1
+
+    y = np.convolve(s.values, h, "valid")
+
+    return pd.Series(y, index=s.index, name="HighPass")
 
 
 def Agile(
