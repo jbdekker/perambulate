@@ -137,8 +137,8 @@ def LowPass(s: pd.Series, fc: float = 0.5, b: float = 0.5) -> pd.Series:
     _, h = WindowedSincLP(fc, b)
     y = np.convolve(s.values, h, "valid")
 
-    pad = h.shape[0] - 1
-    y = np.pad(y, (pad, 0), "constant", constant_values=np.nan)
+    pad = int((h.shape[0] - 1) / 2)
+    y = np.pad(y, (pad, pad), "constant", constant_values=np.nan)
 
     return pd.Series(y, index=s.index, name="LowPass")
 
@@ -168,10 +168,9 @@ def HighPass(s: pd.Series, fc: float = 0.1, b: float = 0.08) -> pd.Series:
     _, h = WindowedSincHP(fc, b)
     y = np.convolve(s.values, h, "valid")
 
-    pad = h.shape[0] - 1
-    print(h.shape)
+    pad = int((h.shape[0] - 1) / 2)
 
-    y = np.pad(y, (pad, 0), "constant", constant_values=np.nan)
+    y = np.pad(y, (pad, pad), "constant", constant_values=np.nan)
 
     return pd.Series(y, index=s.index, name="HighPass")
 
@@ -208,8 +207,8 @@ def BandPass(
     h = np.convolve(h_lpf, h_hpf)
     y = np.convolve(s.values, h, "valid")
 
-    pad = h.shape[0] - 1
-    y = np.pad(y, (pad, 0), "constant", constant_values=np.nan)
+    pad = int((h.shape[0] - 1) / 2)
+    y = np.pad(y, (pad, pad), "constant", constant_values=np.nan)
 
     return pd.Series(y, index=s.index, name="BandReject")
 
@@ -246,8 +245,8 @@ def BandReject(
     h = h_lpf + h_hpf
     y = np.convolve(s.values, h, "valid")
 
-    pad = h.shape[0] - 1
-    y = np.pad(y, (pad, 0), "constant", constant_values=np.nan)
+    pad = int((h.shape[0] - 1) / 2)
+    y = np.pad(y, (pad, pad), "constant", constant_values=np.nan)
 
     return pd.Series(y, index=s.index, name="BandReject")
 
