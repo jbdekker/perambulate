@@ -78,7 +78,13 @@ def MovingAverage(s: pd.Series, window_length: int) -> pd.Series:
     ps.Series
         Filtered input signal
     """
-    y = SG(s=s, window_length=window_length, polyorder=0)
+    y = SG(
+        s=s,
+        window_length=window_length,
+        polyorder=0,
+        mode="constant",
+        cval=np.nan,
+    )
 
     return pd.Series(y, index=s.index, name="MovingAverage")
 
@@ -105,7 +111,7 @@ def WindowedSincHP(fc: float = 0.0006, b: float = 0.0002):
     return N, h
 
 
-def LowPass(s: pd.Series, fc: float = 0.0006, b: float = 0.0002) -> pd.Series:
+def LowPass(s: pd.Series, fc: float = 0.5, b: float = 0.5) -> pd.Series:
     """
     Scaled and windowed sinc filter to turn it into a digital filter
 
@@ -130,6 +136,9 @@ def LowPass(s: pd.Series, fc: float = 0.0006, b: float = 0.0002) -> pd.Series:
 
     _, h = WindowedSincLP(fc, b)
     y = np.convolve(s.values, h, "valid")
+
+    pad = h.shape[0] - 1
+    y = np.pad(y, (pad, 0), "constant", constant_values=np.nan)
 
     return pd.Series(y, index=s.index, name="LowPass")
 
@@ -158,6 +167,11 @@ def HighPass(s: pd.Series, fc: float = 0.1, b: float = 0.08) -> pd.Series:
     """
     _, h = WindowedSincHP(fc, b)
     y = np.convolve(s.values, h, "valid")
+
+    pad = h.shape[0] - 1
+    print(h.shape)
+
+    y = np.pad(y, (pad, 0), "constant", constant_values=np.nan)
 
     return pd.Series(y, index=s.index, name="HighPass")
 
@@ -194,6 +208,9 @@ def BandPass(
     h = np.convolve(h_lpf, h_hpf)
     y = np.convolve(s.values, h, "valid")
 
+    pad = h.shape[0] - 1
+    y = np.pad(y, (pad, 0), "constant", constant_values=np.nan)
+
     return pd.Series(y, index=s.index, name="BandReject")
 
 
@@ -229,11 +246,14 @@ def BandReject(
     h = h_lpf + h_hpf
     y = np.convolve(s.values, h, "valid")
 
+    pad = h.shape[0] - 1
+    y = np.pad(y, (pad, 0), "constant", constant_values=np.nan)
+
     return pd.Series(y, index=s.index, name="BandReject")
 
 
 def Agile(
-    s: pd.Series,
+    data: pd.Series,
     f: float = 2 / 3,
     pts: int = None,
     itn: int = 3,
@@ -266,12 +286,12 @@ def Agile(
         containing the smoothed data.
     """
 
-    x = np.array(s.index, dtype=float)
+    x = np.array(data.index, dtype=float)
     # condition x-values to be between 0 and 1 to reduce errors in linalg
     x = x - x.min()
     x = x / x.max()
-    y = s.values
-    n = len(s)
+    y = data.values
+    n = len(data)
     if pts is None:
         f = np.min([f, 1.0])
         r = int(np.ceil(f * n))
@@ -304,4 +324,4 @@ def Agile(
         delta = np.clip(residuals / (6.0 * s), -1, 1)
         delta = (1 - delta ** 2) ** 2
 
-    return pd.Series(yEst, index=s.index, name="AgileFilter")
+    return pd.Series(yEst, index=data.index, name="AgileFilter")

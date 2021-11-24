@@ -5,3 +5,4 @@ from perambulate.condition.condition import PeriodicCondition
 from perambulate.condition.condition import Index
 
 import perambulate.datasets as datasets
+import perambulate.filters as filters
