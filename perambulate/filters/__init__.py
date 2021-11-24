@@ -83,31 +83,7 @@ def MovingAverage(s: pd.Series, window_length: int) -> pd.Series:
     return pd.Series(y, index=s.index, name="MovingAverage")
 
 
-def WindowedSinc(
-    s: pd.Series, fc: float = 0.0006, b: float = 0.0002
-) -> pd.Series:
-    """
-    Scaled and windowed sinc filter to turn it into a digital filter
-
-    Background:
-        tomroelandts.com/articles/how-to-create-a-simple-low-pass-filter
-        tomroelandts.com/articles/how-to-create-a-simple-high-pass-filter
-
-    Parameters
-    ----------
-    s : pd.Series
-        Input signal
-    fc : float
-        Cutoff frequency as a fraction of the sampling rate (in (0, 0.5)).
-    b : float
-        Transition band, as a fraction of the sampling rate (in (0, 0.5)).
-
-    Returns
-    -------
-    int, np.array
-        Filter
-    """
-
+def WindowedSincLP(fc: float = 0.0006, b: float = 0.0002):
     N = int(np.ceil((4 / b)))
     if not N % 2:
         N += 1
@@ -117,6 +93,14 @@ def WindowedSinc(
     w = np.blackman(N)
     h = h * w
     h = h / np.sum(h)
+
+    return N, h
+
+
+def WindowedSincHP(fc: float = 0.0006, b: float = 0.0002):
+    N, h = WindowedSincLP(fc, b)
+    h = -h
+    h[(N - 1) // 2] += 1
 
     return N, h
 
@@ -144,7 +128,7 @@ def LowPass(s: pd.Series, fc: float = 0.0006, b: float = 0.0002) -> pd.Series:
         Filtered input signal
     """
 
-    _, h = WindowedSinc(s, fc, b)
+    _, h = WindowedSincLP(fc, b)
     y = np.convolve(s.values, h, "valid")
 
     return pd.Series(y, index=s.index, name="LowPass")
@@ -172,13 +156,80 @@ def HighPass(s: pd.Series, fc: float = 0.1, b: float = 0.08) -> pd.Series:
     ps.Series
         Filtered input signal
     """
-    N, h = WindowedSinc(s, fc, b)
-    h = -h
-    h[(N - 1) // 2] += 1
-
+    _, h = WindowedSincHP(fc, b)
     y = np.convolve(s.values, h, "valid")
 
     return pd.Series(y, index=s.index, name="HighPass")
+
+
+def BandPass(
+    s: pd.Series, fc_l: float = 0.1, fc_h: float = 0.4, b: float = 0.08
+) -> pd.Series:
+    """
+    Scaled and windowed sinc filter to turn it into a digital filter
+
+    Background:
+        tomroelandts.com/articles/how-to-create-a-simple-low-pass-filter
+        tomroelandts.com/articles/how-to-create-a-simple-high-pass-filter
+
+    Parameters
+    ----------
+    s : pd.Series
+        Input signal
+    fc_l : float
+        Cutoff frequency as a fraction of the sampling rate (in (0, 0.5)).
+    fc_h : float
+        Cutoff frequency as a fraction of the sampling rate (in (0, 0.5)).
+    b : float
+        Transition band, as a fraction of the sampling rate (in (0, 0.5)).
+
+    Returns
+    -------
+    ps.Series
+        Filtered input signal
+    """
+    _, h_lpf = WindowedSincLP(fc_l, b)
+    _, h_hpf = WindowedSincHP(fc_h, b)
+
+    h = np.convolve(h_lpf, h_hpf)
+    y = np.convolve(s.values, h, "valid")
+
+    return pd.Series(y, index=s.index, name="BandReject")
+
+
+def BandReject(
+    s: pd.Series, fc_l: float = 0.1, fc_h: float = 0.4, b: float = 0.08
+) -> pd.Series:
+    """
+    Scaled and windowed sinc filter to turn it into a digital filter
+
+    Background:
+        tomroelandts.com/articles/how-to-create-a-simple-low-pass-filter
+        tomroelandts.com/articles/how-to-create-a-simple-high-pass-filter
+
+    Parameters
+    ----------
+    s : pd.Series
+        Input signal
+    fc_l : float
+        Cutoff frequency as a fraction of the sampling rate (in (0, 0.5)).
+    fc_h : float
+        Cutoff frequency as a fraction of the sampling rate (in (0, 0.5)).
+    b : float
+        Transition band, as a fraction of the sampling rate (in (0, 0.5)).
+
+    Returns
+    -------
+    ps.Series
+        Filtered input signal
+    """
+    _, h_lpf = WindowedSincLP(fc_l, b)
+    _, h_hpf = WindowedSincHP(fc_h, b)
+
+    h = h_lpf + h_hpf
+    y = np.convolve(s.values, h, "valid")
+
+    return pd.Series(y, index=s.index, name="BandReject")
 
 
 def Agile(
