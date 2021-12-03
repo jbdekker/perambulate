@@ -26,7 +26,7 @@ __all__ = ["Condition"]
 class Condition:
     def __init__(
         self,
-        condition: Union[pd.Index, pd.Series] = None,
+        condition: Union[pd.Series, "Condition"] = None,
         index: pd.Index = None,
     ):
         self.index = None
@@ -39,14 +39,19 @@ class Condition:
                 "provide either a condition or an index, not both"
             )
         if condition is not None:
-            if not isinstance(condition, pd.Series):
+            if isinstance(condition, pd.Series):    
+                self.validate_series(condition)
+                self.index = condition.index
+                self.interval_index = self.mask_to_intervals(condition)
+            elif isinstance(condition, Condition): 
+                self.index = condition.index
+                self.interval_index = condition.interval_index
+            else:
                 raise TypeError(
-                    "condition must be of type `pd.Series`, "
+                    "condition must be of type `pd.Series` or `Condition`, "
                     f"`{type(condition)}` was passed"
                 )
-            self.validate_series(condition)
-            self.index = condition.index
-            self.interval_index = self.mask_to_intervals(condition)
+
         if index is not None:
             if not isinstance(index, pd.Index):
                 raise TypeError(
@@ -171,7 +176,7 @@ class Condition:
         return self._or(other)
 
     def _and(self, other: Union[pd.Series, "Condition"]) -> "Condition":
-        if isinstance(other, pd.Series):
+        if not isinstance(other, Condition):
             other = self.reproduce(condition=other)
             self.validate_index(other.index)
         intervals = sorted(other.interval_index, key=lambda x: x.left)
@@ -479,7 +484,8 @@ class Condition:
             grp.plot(ax=ax)
         ax.legend(loc="best")
 
-    def extract_operator(self, value) -> object:
+    @staticmethod
+    def extract_operator(value) -> object:
         regex = r"^[><=!]{1,2}"
 
         mapping = {
@@ -841,3 +847,54 @@ class PeriodicCondition(Condition):
         self.interval_index = pd.IntervalIndex.from_breaks(
             date_range, closed="left"
         )
+
+class ValueSearch(Condition):
+    def __init__(
+        self, 
+        entry_condition: Union[Condition, pd.Series] = None,
+        entry_filter: str = ">0",
+        exit_condition: Union[Condition, pd.Series] = None,
+        exit_filter: str = ">0",
+        exclude = None,
+    ) -> None:
+        _, entry_value = Condition.extract_operator(entry_filter)
+        EntryCondition = (
+            Condition(entry_condition)
+            .filter(entry_filter)
+            .clip(upper=entry_value, side="right")
+        )
+
+        _, exit_value = Condition.extract_operator(exit_filter)
+        ExitCondition = (
+            Condition(exit_condition)
+            .filter(exit_filter)
+            .clip(upper=exit_value, side="right")
+        )
+
+        entries = sorted(EntryCondition.interval_index, key=lambda x: x.left)
+        exits = sorted(ExitCondition.interval_index, key=lambda x: x.left)
+
+        r = []
+        last_exit = None
+        for entry in entries:
+            if last_exit is None or entry.left >= last_exit:
+                for exit in exits:
+                    if entry.left < exit.right:
+                        r += [
+                            pd.Interval(
+                                entry.left,
+                                exit.right,
+                                exit.closed
+                            )
+                        ]
+                        last_exit = exit.right
+                        break
+
+        self.index = entry_condition.index
+        self.interval_index = pd.IntervalIndex(r)
+
+        if exclude in ["both", "exit"]:
+            self.interval_index = self.shrink(exit_value, side="right").interval_index
+
+        if exclude in ["both", "entry"]:
+            self.interval_index = self.shrink(entry_value, side="left").interval_index
