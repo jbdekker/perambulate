@@ -13,22 +13,24 @@ from typing import Union
 
 import pandas as pd
 
-from .utils import extract_operator
-
-__all__ = ["Condition"]
+from perambulate.core.utils import extract_operator
 
 
-class Condition:
+class BaseCondition:
+    def __init__(self):
+        pass
+
+
+class Condition(BaseCondition):
     def __init__(
         self,
-        condition: Union[pd.Series, "Condition"] = None,
+        condition: Union[pd.Series, BaseCondition] = None,
         index: pd.Index = None,
     ):
+        super().__init__()
         self.index = None
         self.interval_index = self._empty_interval_index
 
-        # if self.all_nons([condition, index]):
-        #     raise ValueError("either a condition or index is required")
         if self.no_nons([condition, index]):
             raise ValueError(
                 "provide either a condition or an index, not both"
@@ -39,13 +41,14 @@ class Condition:
                 self.validate_series(condition)
                 self.index = condition.index
                 self.interval_index = self.mask_to_intervals(condition)
-            elif isinstance(condition, Condition):
+            elif isinstance(condition, BaseCondition):
                 self.index = condition.index
                 self.interval_index = condition.interval_index
             else:
+                print(type(BaseCondition()))
                 raise TypeError(
-                    "condition must be of type `pd.Series` or `Condition`, "
-                    f"`{type(condition)}` was passed"
+                    "condition must be of type `pd.Series` or `BaseCondition`,"
+                    f" `{type(condition)}` was passed"
                 )
 
         if index is not None:
@@ -143,7 +146,7 @@ class Condition:
         )
         return result
 
-    def _or(self, other: Union[pd.Series, "Condition"]) -> "Condition":
+    def _or(self, other: Union[pd.Series, BaseCondition]) -> BaseCondition:
         if isinstance(other, pd.Series):
             other = self.reproduce(condition=other)
             self.validate_index(other.index)
@@ -155,13 +158,13 @@ class Condition:
 
         return result
 
-    def __or__(self, other: Union[pd.Series, "Condition"]) -> "Condition":
+    def __or__(self, other: Union[pd.Series, BaseCondition]) -> BaseCondition:
         return self._or(other)
 
-    def union(self, other: Union[pd.Series, "Condition"]) -> "Condition":
+    def union(self, other: Union[pd.Series, BaseCondition]) -> BaseCondition:
         return self._or(other)
 
-    def _and(self, other: Union[pd.Series, "Condition"]) -> "Condition":
+    def _and(self, other: Union[pd.Series, BaseCondition]) -> BaseCondition:
         if not isinstance(other, Condition):
             other = self.reproduce(condition=other)
             self.validate_index(other.index)
@@ -186,13 +189,15 @@ class Condition:
 
         return result
 
-    def __and__(self, other: Union[pd.Series, "Condition"]) -> "Condition":
+    def __and__(self, other: Union[pd.Series, BaseCondition]) -> BaseCondition:
         return self._and(other)
 
-    def intersect(self, other: Union[pd.Series, "Condition"]) -> "Condition":
+    def intersect(
+        self, other: Union[pd.Series, BaseCondition]
+    ) -> BaseCondition:
         return self._and(other)
 
-    def _xor(self, other: Union[pd.Series, "Condition"]) -> "Condition":
+    def _xor(self, other: Union[pd.Series, BaseCondition]) -> BaseCondition:
         """Exclusive disjunction"""
         # p XOR q = ( p AND NOT q ) OR ( NOT p AND q )
         p = self
@@ -204,10 +209,10 @@ class Condition:
             q = other
         return p._and(q._not())._or(p._not()._and(q))
 
-    def __xor__(self, other: Union[pd.Series, "Condition"]) -> "Condition":
+    def __xor__(self, other: Union[pd.Series, BaseCondition]) -> BaseCondition:
         return self._xor(other)
 
-    def _not(self, limit_area: str = None) -> "Condition":
+    def _not(self, limit_area: str = None) -> BaseCondition:
         """
 
         Parameters
@@ -250,10 +255,10 @@ class Condition:
 
         return result
 
-    def inverse(self, limit_area: str = "None") -> "Condition":
+    def inverse(self, limit_area: str = "None") -> BaseCondition:
         return self._not(limit_area)
 
-    def __invert__(self) -> "Condition":
+    def __invert__(self) -> BaseCondition:
         return self._not()
 
     def shift_intervals(self, left, right) -> pd.IntervalIndex:
@@ -270,7 +275,7 @@ class Condition:
 
         return s
 
-    def move(self, value: object) -> "Condition":
+    def move(self, value: object) -> BaseCondition:
         result = self.copy()
 
         value = pd.Timedelta(value)
@@ -278,7 +283,7 @@ class Condition:
 
         return result
 
-    def shrink(self, value: object, side="both") -> "Condition":
+    def shrink(self, value: object, side="both") -> BaseCondition:
         result = self.copy()
         try:
             left = value if side in ["left", "both"] else 0
@@ -294,7 +299,7 @@ class Condition:
 
     def clip(
         self, lower: object = None, upper: object = None, side="right"
-    ) -> "Condition":
+    ) -> BaseCondition:
         """
         Trim interval length at the input threshold(s)
 
@@ -358,11 +363,11 @@ class Condition:
 
         return result
 
-    def grow(self, value: object, side="both") -> "Condition":
+    def grow(self, value: object, side="both") -> BaseCondition:
         value = pd.Timedelta(value)
         return self.shrink(-value, side)
 
-    def grow_end(self, include_last: bool = False) -> "Condition":
+    def grow_end(self, include_last: bool = False) -> BaseCondition:
         """
         Grow intervals in the condition by extending the end untill the start
         of the next interval.
@@ -466,7 +471,7 @@ class Condition:
             grp.plot(ax=ax)
         ax.legend(loc="best")
 
-    def filter(self, value: str) -> "Condition":
+    def filter(self, value: str) -> BaseCondition:
         """
         Filters the periods within the Condition based on the (in)equality
         defined by **value**
@@ -567,7 +572,7 @@ class Condition:
         operator,
         value: Union[int, float, time, datetime],
         tzinfo: timezone = None,
-    ) -> "Condition":
+    ) -> BaseCondition:
         result = self.copy()
 
         if tzinfo is not None:
@@ -587,32 +592,32 @@ class Condition:
 
     def before(
         self, value: Union[time, datetime], tzinfo: timezone = None
-    ) -> "Condition":
+    ) -> BaseCondition:
         return self._index_filter(lt, value, tzinfo)
 
     def at_or_before(
         self, value: Union[time, datetime], tzinfo: timezone = None
-    ) -> "Condition":
+    ) -> BaseCondition:
         return self._index_filter(le, value, tzinfo)
 
     def after(
         self, value: Union[time, datetime], tzinfo: timezone = None
-    ) -> "Condition":
+    ) -> BaseCondition:
         return self._index_filter(gt, value, tzinfo)
 
     def at_or_after(
         self, value: Union[time, datetime], tzinfo: timezone = None
-    ) -> "Condition":
+    ) -> BaseCondition:
         return self._index_filter(ge, value, tzinfo)
 
-    def __eq__(self, other: "Condition") -> bool:
+    def __eq__(self, other: BaseCondition) -> bool:
         return (
             isinstance(other, type(self))
             & self.index.equals(other.index)
             & self.interval_index.equals(other.interval_index)
         )
 
-    def touches(self, other: "Condition") -> "Condition":
+    def touches(self, other: BaseCondition) -> BaseCondition:
         """Filters condition intervals based on whether it touches an
         interval in other"""
         result = self.copy()
@@ -626,7 +631,7 @@ class Condition:
 
         return result
 
-    def encloses(self, other: "Condition") -> "Condition":
+    def encloses(self, other: BaseCondition) -> BaseCondition:
         """Filters condition intervals based on whether it encloses an
         interval in other"""
 
@@ -648,7 +653,7 @@ class Condition:
 
         return result
 
-    def inside(self, other: "Condition") -> "Condition":
+    def inside(self, other: BaseCondition) -> BaseCondition:
         """Filters condition intervals based on whether it is enclosed by an
         interval in other"""
 

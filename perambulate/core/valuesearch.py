@@ -2,8 +2,8 @@ from typing import Union
 
 import pandas as pd
 
-from .condition import Condition
-from .utils import extract_operator
+from perambulate.core.condition import Condition
+from perambulate.core.utils import extract_operator
 
 
 def ValueSearch(

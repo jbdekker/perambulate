@@ -5,7 +5,7 @@ from typing import Union
 import numpy as np
 import pandas as pd
 
-from .condition import Condition
+from perambulate.core.condition import Condition
 
 
 def Periodic(
