@@ -7,8 +7,7 @@ from perambulate import Condition
 
 
 def test_init_none():
-    with pytest.raises(ValueError):
-        Condition()
+    Condition()
 
 
 def test_init_reproduce(sinusoid_d):

@@ -1,16 +1,12 @@
 import copy
-import re
 from datetime import datetime
 from datetime import time
-from datetime import timedelta
 from datetime import timezone
 from itertools import compress
-from operator import eq
 from operator import ge
 from operator import gt
 from operator import le
 from operator import lt
-from operator import ne
 from typing import Callable
 from typing import List
 from typing import Union
@@ -19,6 +15,7 @@ import numpy as np
 import pandas as pd
 from pandas.core.indexes.datetimes import DatetimeIndex
 
+from .utils import extract_operator
 
 __all__ = ["Condition"]
 
@@ -32,12 +29,13 @@ class Condition:
         self.index = None
         self.interval_index = self._empty_interval_index
 
-        if self.all_nons([condition, index]):
-            raise ValueError("either a condition or index is required")
+        # if self.all_nons([condition, index]):
+        #     raise ValueError("either a condition or index is required")
         if self.no_nons([condition, index]):
             raise ValueError(
                 "provide either a condition or an index, not both"
             )
+
         if condition is not None:
             if isinstance(condition, pd.Series):    
                 self.validate_series(condition)
@@ -484,27 +482,6 @@ class Condition:
             grp.plot(ax=ax)
         ax.legend(loc="best")
 
-    @staticmethod
-    def extract_operator(value) -> object:
-        regex = r"^[><=!]{1,2}"
-
-        mapping = {
-            ">=": ge,
-            "<=": le,
-            ">": gt,
-            "<": lt,
-            "==": eq,
-            "!=": ne,
-        }
-
-        try:
-            token = re.findall(regex, value.strip())[0]
-            op = mapping[token]
-            value = value.replace(token, "")
-        except (KeyError, IndexError):
-            raise KeyError(value)
-        return op, value
-
     def filter(self, value: str) -> "Condition":
         """
         Filters the periods within the Condition based on the (in)equality
@@ -557,7 +534,7 @@ class Condition:
         """
         result = self.copy()
 
-        op, value = self.extract_operator(value)
+        op, value = extract_operator(value, default_op=">=")
 
         if self._is_datetime_type():
             value = pd.Timedelta(value)
@@ -780,121 +757,3 @@ class Condition:
         self, data: Union[pd.Series, pd.DataFrame]
     ) -> List[Union[pd.Series, pd.DataFrame]]:
         return [grp for _, grp in self._cut(data).groupby("interval")]
-
-    def describe(
-        self, data: Union[pd.Series, pd.DataFrame], func: Union[Callable, dict]
-    ):
-        pass
-
-
-class Index(Condition):
-    def __init__(
-        self,
-        index: pd.Index = None,
-    ):
-        super().__init__(index=index)
-
-
-class PeriodicCondition(Condition):
-    def __init__(
-        self,
-        index: pd.Index,
-        freq: Union[pd.Timedelta, timedelta, np.timedelta64, str, int],
-        unit: str = None,
-        start: datetime = None,
-        end: datetime = None,
-        peg: datetime = None,
-        normalize: bool = False,
-        closed: str = "left",
-        partial_periods: bool = False,
-    ):
-        """
-        You can construct a Timedelta scalar through various arguments, including ISO 8601 Duration strings.
-        """
-        super().__init__(index=index)
-
-        freq = pd.Timedelta(value=freq, unit=unit)
-
-        start = start or self.index.min()
-        end = end or self.index.max()
-        periods = np.ceil((self.index.max() - self.index.min()) / freq) + 1
-
-        if peg is not None:
-            start = peg - pd.Timedelta((np.ceil((peg - start) / freq) * freq))
-            periods += 1
-            end = None
-        else:
-            if closed == "left":
-                end = None
-            elif closed == "right":
-                start = None
-            else:
-                raise ValueError(f"`{closed}` is not a valid value for closed")
-
-        date_range = pd.date_range(
-            start=start,
-            end=end,
-            periods=periods,
-            freq=freq,
-            normalize=normalize,
-        )
-
-        if not partial_periods:
-            date_range = date_range[
-                (date_range > index.min()) & (date_range < index.max())
-            ]
-
-        self.interval_index = pd.IntervalIndex.from_breaks(
-            date_range, closed="left"
-        )
-
-class ValueSearch(Condition):
-    def __init__(
-        self, 
-        entry_condition: Union[Condition, pd.Series] = None,
-        entry_filter: str = ">0",
-        exit_condition: Union[Condition, pd.Series] = None,
-        exit_filter: str = ">0",
-        exclude = None,
-    ) -> None:
-        _, entry_value = Condition.extract_operator(entry_filter)
-        EntryCondition = (
-            Condition(entry_condition)
-            .filter(entry_filter)
-            .clip(upper=entry_value, side="right")
-        )
-
-        _, exit_value = Condition.extract_operator(exit_filter)
-        ExitCondition = (
-            Condition(exit_condition)
-            .filter(exit_filter)
-            .clip(upper=exit_value, side="right")
-        )
-
-        entries = sorted(EntryCondition.interval_index, key=lambda x: x.left)
-        exits = sorted(ExitCondition.interval_index, key=lambda x: x.left)
-
-        r = []
-        last_exit = None
-        for entry in entries:
-            if last_exit is None or entry.left >= last_exit:
-                for exit in exits:
-                    if entry.left < exit.right:
-                        r += [
-                            pd.Interval(
-                                entry.left,
-                                exit.right,
-                                exit.closed
-                            )
-                        ]
-                        last_exit = exit.right
-                        break
-
-        self.index = entry_condition.index
-        self.interval_index = pd.IntervalIndex(r)
-
-        if exclude in ["both", "exit"]:
-            self.interval_index = self.shrink(exit_value, side="right").interval_index
-
-        if exclude in ["both", "entry"]:
-            self.interval_index = self.shrink(entry_value, side="left").interval_index
