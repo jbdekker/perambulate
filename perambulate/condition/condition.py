@@ -11,9 +11,7 @@ from typing import Callable
 from typing import List
 from typing import Union
 
-import numpy as np
 import pandas as pd
-from pandas.core.indexes.datetimes import DatetimeIndex
 
 from .utils import extract_operator
 
@@ -65,11 +63,6 @@ class Condition:
             [], closed="left", dtype="interval[datetime64[ns]]"
         )
 
-    def _is_datetime_type(self) -> bool:
-        return self.interval_index.dtype.subtype == np.dtype(
-            "datetime64[ns]"
-        ) or isinstance(self.index, pd.DatetimeIndex)
-
     def _is_none(self, obj) -> List[bool]:
         return [x is None for x in list(obj)]
 
@@ -102,12 +95,7 @@ class Condition:
 
     def mask_to_intervals(self, obj: pd.Series) -> pd.IntervalIndex:
         mask = (obj != obj.shift(1)).cumsum()
-
-        datetime_mask = False
-        freq = None
-        if isinstance(obj.index, DatetimeIndex):
-            datetime_mask = True
-            freq = pd.Timedelta(obj.index.freq)
+        freq = pd.Timedelta(obj.index.freq)
 
         def func(x):
             left = x.index[0]
@@ -115,7 +103,7 @@ class Condition:
             try:
                 right = mask.index[i + 1]
             except IndexError:
-                if datetime_mask and freq is not None:
+                if freq is not None:
                     right = mask.index[i] + freq
                 else:
                     right = mask.index[i] + (mask.index[i] - mask.index[i - 1])
@@ -285,8 +273,7 @@ class Condition:
     def move(self, value: object) -> "Condition":
         result = self.copy()
 
-        if self._is_datetime_type():
-            value = pd.Timedelta(value)
+        value = pd.Timedelta(value)
         result.interval_index = self.shift_intervals(value, value)
 
         return result
@@ -297,9 +284,8 @@ class Condition:
             left = value if side in ["left", "both"] else 0
             right = value if side in ["right", "both"] else 0
 
-            if self._is_datetime_type():
-                left = pd.Timedelta(left)
-                right = pd.Timedelta(right)
+            left = pd.Timedelta(left)
+            right = pd.Timedelta(right)
 
             result.interval_index = self.shift_intervals(left, -right)
         except (ValueError, IndexError):
@@ -329,10 +315,9 @@ class Condition:
             Same type as calling object with the intervals clipped according to
             the clip threshold(s)
         """
-        if self._is_datetime_type():
-            lower = pd.Timedelta(lower)
-            upper = pd.Timedelta(upper)
-            null = pd.Timedelta(0)
+        lower = pd.Timedelta(lower)
+        upper = pd.Timedelta(upper)
+        null = pd.Timedelta(0)
 
         r = []
         for x in self.interval_index:
@@ -374,8 +359,7 @@ class Condition:
         return result
 
     def grow(self, value: object, side="both") -> "Condition":
-        if self._is_datetime_type():
-            value = pd.Timedelta(value)
+        value = pd.Timedelta(value)
         return self.shrink(-value, side)
 
     def grow_end(self, include_last: bool = False) -> "Condition":
@@ -536,8 +520,7 @@ class Condition:
 
         op, value = extract_operator(value, default_op=">=")
 
-        if self._is_datetime_type():
-            value = pd.Timedelta(value)
+        value = pd.Timedelta(value)
         result.interval_index = pd.IntervalIndex(
             [x for x in self.interval_index if op(x.length, value)]
         )

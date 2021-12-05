@@ -14,24 +14,35 @@ def ValueSearch(
     exclude=None,
 ) -> Condition:
     """
-    Trim interval length at the input threshold(s)
+    Create a condition with intervals that match the given entry and exit
+    criteria.
 
     Parameters
     ----------
-    lower : object
-        Minimum interval length, all intervals having a length below this
-        value will be extended to it.
-    upper : object
-        Maximum interval length, all intervals having a length above this
-        value will be shortened to it.
-    side : {{'both', 'left', 'right'}}, default 'right'
-        Side on which to adjust the interval
+    entry_condition : Condition, pd.Series
+        Entry condition
+    entry_filter : str
+        timedelta (in)equality
+    exit_condition : Condition, pd.Series
+        Exit condition
+    exit_filter : str
+        timedelta (in)equality
+    exclude : {{None, 'entry', 'exit', 'both'}}, default None
+        If not None, excludes the entry or exit (or both) from the matched
+        intervals
 
     Returns
     -------
     Condition
-        Same type as calling object with the intervals clipped according to
-        the clip threshold(s)
+        Condition object with its intervals matching the entry and exit
+        criteria
+
+    Examples
+    --------
+    >>> df = pr.datasets.load_sinusoid()
+    >>> pr.ValueSearch(df.sinusoid > -1, "1d", df.sinusoid > 1, "1d")
+                     left               right closed           length
+    0 2021-01-03 20:00:00 2021-01-26 04:00:00   left 22 days 08:00:00
     """
     _, entry_value = extract_operator(entry_filter)
     EntryCondition = (
