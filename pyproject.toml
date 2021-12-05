@@ -1,16 +1,17 @@
 [tool.poetry]
 name = "perambulate"
-version = "0.1.3"
+version = "0.1.4"
 description = "Timeseries analysis modules"
 authors = ["Jordi Dekker <pypi@jordidekker.net>"]
 license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = ">3.7,<3.11"
 pandas = "^1.0.1"
 numpy = "&1.18.1"
 matplotlib = "^3.3.4"
+scipy = "^1.7.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.1"
