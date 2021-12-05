@@ -37,11 +37,11 @@ class Condition:
             )
 
         if condition is not None:
-            if isinstance(condition, pd.Series):    
+            if isinstance(condition, pd.Series):
                 self.validate_series(condition)
                 self.index = condition.index
                 self.interval_index = self.mask_to_intervals(condition)
-            elif isinstance(condition, Condition): 
+            elif isinstance(condition, Condition):
                 self.index = condition.index
                 self.interval_index = condition.interval_index
             else:

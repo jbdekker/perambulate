@@ -1,4 +1,3 @@
-
 import perambulate as pr
 
 df = pr.datasets.load_sinusoid()

@@ -1,16 +1,12 @@
 from datetime import datetime
 
 import pandas as pd
-import pytest
 
 from perambulate import Condition
 
 
 def test_filter(sinusoid_d):
     A = Condition(condition=(sinusoid_d > -0.5) & (sinusoid_d < 0.5))
-
-    with pytest.raises(KeyError):
-        A.filter("42")
 
     B = A.filter(">2d").filter("<=3d")
 
